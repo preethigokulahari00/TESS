@@ -52,10 +52,13 @@
             </div>
         </div>
 
-        <!-- Upload History (Future Enhancement) -->
+        <!-- Upload History -->
         <div class="card shadow-sm mt-4">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0"><i class="bi bi-clock-history"></i> Recent Uploads</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="viewAllUploadsBtn" title="View All Uploads">
+                    <i class="bi bi-grid-3x3-gap"></i> View All
+                </button>
             </div>
             <div class="card-body">
                 <div id="uploadHistory" class="list-group list-group-flush">
@@ -116,6 +119,129 @@
         </div>
     </div>
 </div>
+
+<!-- All Uploads Modal -->
+<div class="modal fade" id="allUploadsModal" tabindex="-1" aria-labelledby="allUploadsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="allUploadsModalLabel">
+                    <i class="bi bi-archive"></i> Upload Archive
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table id="uploadsDataTable" class="table table-striped table-hover" style="width:100%">
+                        <thead>
+                            <tr>
+                                <th style="width: 23%;">Filename</th>
+                                <th style="width: 10%;">Status</th>
+                                <th style="width: 17%;">Upload Date</th>
+                                <th style="width: 17%;">Completed</th>
+                                <th style="width: 15%;">File Hash</th>
+                                <th style="width: 18%;" class="actions-column">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Data will be loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h6 class="modal-title" id="deleteConfirmModalLabel">
+                    <i class="bi bi-exclamation-triangle"></i> Confirm Deletion
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">Are you sure you want to delete this file?</p>
+                <p class="mb-0"><strong id="deleteFileName" class="text-break"></strong></p>
+                <p class="text-muted small mt-2 mb-0">This action cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" id="confirmDeleteBtn">
+                    <i class="bi bi-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Download Confirmation Modal -->
+<div class="modal fade" id="downloadConfirmModal" tabindex="-1" aria-labelledby="downloadConfirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h6 class="modal-title" id="downloadConfirmModalLabel">
+                    <i class="bi bi-download"></i> Confirm Download
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">Do you want to download this file?</p>
+                <p class="mb-0"><strong id="downloadFileName" class="text-break"></strong></p>
+                <p class="text-muted small mt-2 mb-0">The file will be decrypted and downloaded to your device.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="confirmDownloadBtn">
+                    <i class="bi bi-download"></i> Download
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tamper Detection Result Modal -->
+<div class="modal fade" id="tamperDetectionModal" tabindex="-1" aria-labelledby="tamperDetectionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header" id="tamperModalHeader">
+                <h6 class="modal-title" id="tamperDetectionModalLabel">
+                    <i class="bi bi-shield-check"></i> Tamper Detection Result
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-3" id="tamperIcon">
+                    <!-- Icon will be inserted here -->
+                </div>
+                <h5 class="text-center mb-3" id="tamperStatus">
+                    <!-- Status message will be inserted here -->
+                </h5>
+                <p class="mb-2"><strong>File:</strong> <span id="tamperFileName" class="text-break"></span></p>
+                <p class="mb-2"><strong>Original Hash:</strong></p>
+                <code class="d-block small text-break mb-2" id="tamperOriginalHash"></code>
+                <p class="mb-2"><strong>Current Hash:</strong></p>
+                <code class="d-block small text-break mb-2" id="tamperCurrentHash"></code>
+                <div id="tamperDetails" class="alert mt-3" role="alert">
+                    <!-- Additional details will be inserted here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}

@@ -9,7 +9,7 @@ from bson import ObjectId
 import logging
 import traceback
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_file
 from flask_pymongo import PyMongo
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -389,18 +389,402 @@ def upload_history():
     """Get user's upload history from MongoDB"""
     uploads = mongo.db.uploads.find({
         'user_id': ObjectId(current_user.id)
-    }).sort('created_at', -1).limit(10)
+    }).sort('created_at', -1).limit(3)
 
     upload_list = []
     for upload in uploads:
         upload_list.append({
             'filename': upload.get('filename'),
             'status': upload.get('status'),
-            'created_at': upload.get('created_at'),
+            'created_at': upload.get('created_at').isoformat() if upload.get('created_at') else None,
             'file_hash': upload.get('file_hash')
         })
 
     return jsonify(upload_list)
+
+@app.route('/upload-archive')
+@login_required
+def upload_archive():
+    """Get complete upload archive for data grid"""
+    uploads = mongo.db.uploads.find({
+        'user_id': ObjectId(current_user.id)
+    }).sort('created_at', -1)
+
+    upload_list = []
+    for upload in uploads:
+        upload_list.append({
+            'filename': upload.get('filename'),
+            'status': upload.get('status'),
+            'created_at': upload.get('created_at').isoformat() if upload.get('created_at') else None,
+            'completed_at': upload.get('completed_at').isoformat() if upload.get('completed_at') else None,
+            'file_hash': upload.get('file_hash'),
+            's3_key': upload.get('s3_key'),
+            'upload_id': upload.get('upload_id')
+        })
+
+    return jsonify(upload_list)
+
+@app.route('/download/<path:s3_key>')
+@login_required
+def download_file(s3_key):
+    """Download and decrypt file from S3"""
+    try:
+        # Find the upload record
+        upload = mongo.db.uploads.find_one({
+            'user_id': ObjectId(current_user.id),
+            's3_key': s3_key
+        })
+
+        if not upload:
+            logger.warning(f"Download attempt for non-existent file - User: {current_user.username}, S3 Key: {s3_key}")
+            return jsonify({'error': 'File not found'}), 404
+
+        if not s3_client or not s3_bucket:
+            logger.error(f"Download failed - S3 not configured - User: {current_user.username}")
+            return jsonify({'error': 'S3 not configured'}), 500
+
+        # Get the file from S3
+        logger.info(f"Download started - User: {current_user.username}, File: {upload['filename']}, S3 Key: {s3_key}")
+
+        response = s3_client.get_object(Bucket=s3_bucket, Key=s3_key)
+        encrypted_data = response['Body'].read()
+
+        # Decrypt the file
+        encryption_key = upload.get('encryption_key')
+        if not encryption_key:
+            logger.error(f"Download failed - No encryption key - User: {current_user.username}, File: {upload['filename']}")
+            return jsonify({'error': 'Encryption key not found'}), 500
+
+        # Validate encryption key
+        if not isinstance(encryption_key, bytes):
+            logger.error(f"Download failed - Invalid encryption key type - User: {current_user.username}, File: {upload['filename']}")
+            return jsonify({'error': 'Invalid encryption key format'}), 500
+
+        if len(encryption_key) != 32:  # AES-256 requires 32-byte key
+            logger.error(f"Download failed - Invalid encryption key length: {len(encryption_key)} - User: {current_user.username}, File: {upload['filename']}")
+            return jsonify({'error': 'Invalid encryption key length'}), 500
+
+        # Decrypt chunks
+        decrypted_data = BytesIO()
+        chunk_size = 5 * 1024 * 1024  # 5MB chunks (unencrypted)
+
+        # The encrypted format is: [IV1][EncChunk1][IV2][EncChunk2]...
+        # Each IV is 16 bytes, followed by an encrypted chunk (multiple of 16 bytes)
+        # The challenge: we don't know exact encrypted chunk sizes in advance
+
+        offset = 0
+        chunk_num = 0
+
+        while offset < len(encrypted_data):
+            chunk_num += 1
+
+            # Check if we have enough data for IV
+            if offset + 16 > len(encrypted_data):
+                logger.warning(f"Incomplete IV at offset {offset} - User: {current_user.username}, File: {upload['filename']}")
+                break
+
+            # Extract IV (first 16 bytes of chunk)
+            iv = encrypted_data[offset:offset + 16]
+            offset += 16
+
+            # Calculate remaining data after this IV
+            remaining = len(encrypted_data) - offset
+
+            if remaining == 0:
+                logger.warning(f"No data after IV at chunk {chunk_num} - User: {current_user.username}, File: {upload['filename']}")
+                break
+
+            # Determine encrypted chunk size:
+            # - Standard chunk: original 5MB + padding (max 5242896 bytes)
+            # - We need to read until next IV or end of file
+            # - Since we can't detect IV position without metadata, we use heuristics:
+
+            # For most chunks, encrypted size is chunk_size + 16 bytes padding (when chunk_size % 16 == 0)
+            max_encrypted_chunk = chunk_size + 16  # 5242896 bytes
+
+            # Read either max_encrypted_chunk or all remaining data, whichever is smaller
+            if remaining <= max_encrypted_chunk:
+                # This is likely the last chunk, read all remaining
+                current_chunk_size = remaining
+            else:
+                # Not the last chunk, read standard size
+                current_chunk_size = max_encrypted_chunk
+
+            # Ensure chunk size is a multiple of 16 (required for AES-CBC)
+            if current_chunk_size % 16 != 0:
+                # Round down to nearest multiple of 16
+                aligned_size = (current_chunk_size // 16) * 16
+                logger.warning(f"Chunk {chunk_num}: Adjusting size from {current_chunk_size} to {aligned_size} - User: {current_user.username}, File: {upload['filename']}")
+                current_chunk_size = aligned_size
+
+            if current_chunk_size == 0:
+                logger.error(f"Chunk {chunk_num}: Cannot read 0 bytes - User: {current_user.username}, File: {upload['filename']}")
+                break
+
+            # Extract encrypted chunk
+            encrypted_chunk = encrypted_data[offset:offset + current_chunk_size]
+
+            # Final validation
+            if len(encrypted_chunk) % 16 != 0:
+                logger.error(f"Chunk {chunk_num}: Invalid size {len(encrypted_chunk)} (not multiple of 16) - User: {current_user.username}, File: {upload['filename']}")
+                raise ValueError(f"Encrypted chunk size ({len(encrypted_chunk)}) is not a multiple of block size (16)")
+
+            offset += current_chunk_size
+
+            # Decrypt chunk
+            try:
+                cipher = Cipher(algorithms.AES(encryption_key), modes.CBC(iv), backend=default_backend())
+                decryptor = cipher.decryptor()
+                decrypted_chunk = decryptor.update(encrypted_chunk) + decryptor.finalize()
+            except Exception as e:
+                logger.error(f"Chunk {chunk_num}: Decryption failed - User: {current_user.username}, File: {upload['filename']}\nError: {str(e)}")
+                raise ValueError(f"Decryption failed at chunk {chunk_num}: {str(e)}")
+
+            # Remove padding (PKCS7 padding - last byte indicates padding length)
+            if len(decrypted_chunk) == 0:
+                logger.error(f"Chunk {chunk_num}: Decrypted chunk is empty - User: {current_user.username}, File: {upload['filename']}")
+                return jsonify({
+                    'error': 'File appears to be corrupted or tampered with. Please verify file integrity.',
+                    'error_type': 'decryption_failed',
+                    'suggestion': 'Run integrity verification to check if the file has been modified.'
+                }), 500
+
+            padding_length = decrypted_chunk[-1]
+
+            # Validate padding length
+            if not isinstance(padding_length, int):
+                padding_length = int(padding_length)
+
+            if padding_length < 1 or padding_length > 16:
+                logger.error(f"Chunk {chunk_num}: Invalid padding length {padding_length} - User: {current_user.username}, File: {upload['filename']}")
+                logger.warning(f"File likely tampered with or corrupted - User: {current_user.username}, File: {upload['filename']}")
+                return jsonify({
+                    'error': 'File appears to be corrupted or tampered with. Invalid encryption padding detected.',
+                    'error_type': 'tampered_or_corrupted',
+                    'suggestion': 'Run integrity verification to confirm tampering.'
+                }), 500
+
+            # Verify padding is correct (all padding bytes should be the same)
+            if len(decrypted_chunk) < padding_length:
+                logger.error(f"Chunk {chunk_num}: Decrypted chunk too small for padding - User: {current_user.username}, File: {upload['filename']}")
+                return jsonify({
+                    'error': 'File appears to be corrupted or tampered with.',
+                    'error_type': 'invalid_format',
+                    'suggestion': 'Run integrity verification to check file status.'
+                }), 500
+
+            # Validate padding bytes
+            padding_valid = True
+            for i in range(padding_length):
+                if decrypted_chunk[-(i+1)] != padding_length:
+                    padding_valid = False
+                    break
+
+            if not padding_valid:
+                logger.error(f"Chunk {chunk_num}: Invalid padding detected - User: {current_user.username}, File: {upload['filename']}")
+                logger.warning(f"File likely tampered with - User: {current_user.username}, File: {upload['filename']}")
+                return jsonify({
+                    'error': 'File appears to be tampered with. Padding validation failed.',
+                    'error_type': 'tampered',
+                    'suggestion': 'Run integrity verification. The file may have been modified in S3.'
+                }), 500
+
+            # Remove padding
+            decrypted_chunk = decrypted_chunk[:-padding_length]
+
+            decrypted_data.write(decrypted_chunk)
+            logger.debug(f"Chunk {chunk_num}: Successfully decrypted {len(decrypted_chunk)} bytes - User: {current_user.username}")
+
+        decrypted_data.seek(0)
+
+        logger.info(f"Download completed - User: {current_user.username}, File: {upload['filename']}")
+
+        # Return file as download
+        return send_file(
+            decrypted_data,
+            as_attachment=True,
+            download_name=upload['filename'],
+            mimetype='application/octet-stream'
+        )
+
+    except ClientError as e:
+        logger.error(f"S3 download error - User: {current_user.username}, S3 Key: {s3_key}\nError: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'error': 'Failed to download file from S3'}), 500
+    except Exception as e:
+        logger.error(f"Download error - User: {current_user.username}, S3 Key: {s3_key}\nError: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'error': 'An error occurred during download'}), 500
+
+@app.route('/verify-file/<upload_id>', methods=['GET'])
+@login_required
+def verify_file_integrity(upload_id):
+    """Verify file integrity by comparing stored hash with current hash"""
+    try:
+        # Find the upload record
+        upload = mongo.db.uploads.find_one({
+            'user_id': ObjectId(current_user.id),
+            'upload_id': upload_id
+        })
+
+        if not upload:
+            logger.warning(f"Verification attempt for non-existent upload - User: {current_user.username}, Upload ID: {upload_id}")
+            return jsonify({'error': 'Upload not found'}), 404
+
+        filename = upload.get('filename')
+        s3_key = upload.get('s3_key')
+        original_hash = upload.get('file_hash')
+
+        logger.info(f"Verification started - User: {current_user.username}, File: {filename}, Upload ID: {upload_id}")
+
+        if not original_hash:
+            logger.error(f"Verification failed - No original hash - User: {current_user.username}, File: {filename}")
+            return jsonify({'error': 'Original hash not found'}), 500
+
+        if not s3_client or not s3_bucket:
+            logger.error(f"Verification failed - S3 not configured - User: {current_user.username}")
+            return jsonify({'error': 'S3 not configured'}), 500
+
+        # Download and decrypt the file
+        try:
+            response = s3_client.get_object(Bucket=s3_bucket, Key=s3_key)
+            encrypted_data = response['Body'].read()
+
+            # Get encryption key
+            encryption_key = upload.get('encryption_key')
+            if not encryption_key:
+                logger.error(f"Verification failed - No encryption key - User: {current_user.username}, File: {filename}")
+                return jsonify({'error': 'Encryption key not found'}), 500
+
+            # Decrypt the file
+            decrypted_data = BytesIO()
+            chunk_size = 5 * 1024 * 1024  # 5MB chunks
+            max_encrypted_chunk = chunk_size + 16
+
+            offset = 0
+            chunk_num = 0
+
+            while offset < len(encrypted_data):
+                chunk_num += 1
+
+                if offset + 16 > len(encrypted_data):
+                    break
+
+                # Extract IV
+                iv = encrypted_data[offset:offset + 16]
+                offset += 16
+
+                remaining = len(encrypted_data) - offset
+                if remaining == 0:
+                    break
+
+                # Determine chunk size
+                if remaining <= max_encrypted_chunk:
+                    current_chunk_size = remaining
+                else:
+                    current_chunk_size = max_encrypted_chunk
+
+                # Align to 16-byte boundary
+                if current_chunk_size % 16 != 0:
+                    current_chunk_size = (current_chunk_size // 16) * 16
+
+                if current_chunk_size == 0:
+                    break
+
+                # Extract encrypted chunk
+                encrypted_chunk = encrypted_data[offset:offset + current_chunk_size]
+
+                if len(encrypted_chunk) % 16 != 0:
+                    logger.error(f"Verification failed - Invalid chunk size {len(encrypted_chunk)} - User: {current_user.username}, File: {filename}")
+                    return jsonify({'error': 'Invalid encrypted data format'}), 500
+
+                offset += current_chunk_size
+
+                # Decrypt chunk
+                try:
+                    cipher = Cipher(algorithms.AES(encryption_key), modes.CBC(iv), backend=default_backend())
+                    decryptor = cipher.decryptor()
+                    decrypted_chunk = decryptor.update(encrypted_chunk) + decryptor.finalize()
+                except Exception as e:
+                    logger.error(f"Verification decryption failed at chunk {chunk_num} - User: {current_user.username}, File: {filename}\nError: {str(e)}")
+                    return jsonify({'error': 'Decryption failed during verification'}), 500
+
+                # Remove padding
+                if len(decrypted_chunk) > 0:
+                    padding_length = decrypted_chunk[-1]
+                    if isinstance(padding_length, int) and 1 <= padding_length <= 16:
+                        decrypted_chunk = decrypted_chunk[:-padding_length]
+
+                decrypted_data.write(decrypted_chunk)
+
+            # Compute hash of decrypted data
+            decrypted_data.seek(0)
+            current_hash = compute_sha1(decrypted_data.read())
+
+            # Compare hashes
+            tampered = (current_hash != original_hash)
+
+            logger.info(f"Verification completed - User: {current_user.username}, File: {filename}, Tampered: {tampered}")
+            logger.info(f"Hash comparison - Original: {original_hash}, Current: {current_hash}")
+
+            return jsonify({
+                'tampered': tampered,
+                'original_hash': original_hash,
+                'current_hash': current_hash,
+                'filename': filename
+            })
+
+        except ClientError as e:
+            logger.error(f"S3 verification error - User: {current_user.username}, S3 Key: {s3_key}\nError: {str(e)}\n{traceback.format_exc()}")
+            return jsonify({'error': 'Failed to retrieve file from S3'}), 500
+
+    except Exception as e:
+        logger.error(f"Verification error - User: {current_user.username}, Upload ID: {upload_id}\nError: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'error': 'An error occurred during verification'}), 500
+
+@app.route('/delete-upload/<upload_id>', methods=['DELETE'])
+@login_required
+def delete_upload(upload_id):
+    """Delete file from S3 and remove record from MongoDB"""
+    try:
+        # Find the upload record
+        upload = mongo.db.uploads.find_one({
+            'user_id': ObjectId(current_user.id),
+            'upload_id': upload_id
+        })
+
+        if not upload:
+            logger.warning(f"Delete attempt for non-existent upload - User: {current_user.username}, Upload ID: {upload_id}")
+            return jsonify({'success': False, 'error': 'Upload not found'}), 404
+
+        s3_key = upload.get('s3_key')
+        filename = upload.get('filename')
+
+        logger.info(f"Delete started - User: {current_user.username}, File: {filename}, Upload ID: {upload_id}")
+
+        # Delete from S3
+        if s3_client and s3_bucket and s3_key:
+            try:
+                s3_client.delete_object(Bucket=s3_bucket, Key=s3_key)
+                logger.info(f"File deleted from S3 - User: {current_user.username}, File: {filename}, S3 Key: {s3_key}")
+            except ClientError as e:
+                logger.error(f"S3 delete error - User: {current_user.username}, S3 Key: {s3_key}\nError: {str(e)}")
+                # Continue to delete from DB even if S3 delete fails
+
+        # Delete from MongoDB
+        result = mongo.db.uploads.delete_one({
+            'user_id': ObjectId(current_user.id),
+            'upload_id': upload_id
+        })
+
+        if result.deleted_count > 0:
+            logger.info(f"Upload record deleted - User: {current_user.username}, File: {filename}, Upload ID: {upload_id}")
+            return jsonify({'success': True, 'message': 'File deleted successfully'})
+        else:
+            logger.error(f"Failed to delete upload record - User: {current_user.username}, Upload ID: {upload_id}")
+            return jsonify({'success': False, 'error': 'Failed to delete upload record'}), 500
+
+    except Exception as e:
+        logger.error(f"Delete error - User: {current_user.username}, Upload ID: {upload_id}\nError: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'error': 'An error occurred during deletion'}), 500
 
 @app.route('/health')
 def health_check():

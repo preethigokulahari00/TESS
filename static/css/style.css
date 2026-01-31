@@ -145,3 +145,218 @@ body {
         padding-right: 1rem;
     }
 }
+
+/* DataTable Column Resizer */
+#uploadsDataTable thead th {
+    position: relative;
+    padding-right: 15px;
+}
+
+.column-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background-color 0.2s ease;
+}
+
+.column-resizer:hover {
+    background-color: rgba(13, 110, 253, 0.2);
+}
+
+.column-resizer::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 60%;
+    background-color: rgba(0, 0, 0, 0.1);
+    transition: background-color 0.2s ease;
+}
+
+.column-resizer:hover::before {
+    background-color: rgba(13, 110, 253, 0.6);
+}
+
+#uploadsDataTable thead th.column-resizing {
+    background-color: rgba(13, 110, 253, 0.1);
+    border-right: 2px solid rgba(13, 110, 253, 0.5);
+}
+
+/* Actions column styling */
+#uploadsDataTable thead th.actions-column,
+#uploadsDataTable tbody td:last-child {
+    width: 18% !important;
+    min-width: 160px;
+    max-width: 160px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+#uploadsDataTable .action-buttons {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    align-items: center;
+}
+
+#uploadsDataTable .action-buttons .btn {
+    padding: 4px 8px;
+    font-size: 0.85rem;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+#uploadsDataTable .action-buttons .verify-btn:hover {
+    background-color: #198754;
+    color: white;
+    transform: translateY(-1px);
+}
+
+#uploadsDataTable .action-buttons .download-btn:hover {
+    background-color: #0d6efd;
+    color: white;
+    transform: translateY(-1px);
+}
+
+#uploadsDataTable .action-buttons .delete-btn:hover {
+    background-color: #dc3545;
+    color: white;
+    transform: translateY(-1px);
+}
+
+/* Confirmation Modals */
+#deleteConfirmModal .modal-content,
+#downloadConfirmModal .modal-content {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.2);
+}
+
+#deleteConfirmModal .modal-header,
+#downloadConfirmModal .modal-header {
+    border-radius: 12px 12px 0 0;
+    padding: 1rem 1.25rem;
+}
+
+#deleteConfirmModal .modal-body,
+#downloadConfirmModal .modal-body {
+    padding: 1.25rem;
+}
+
+#deleteConfirmModal .modal-footer,
+#downloadConfirmModal .modal-footer {
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid #dee2e6;
+}
+
+#deleteConfirmModal .modal-title,
+#downloadConfirmModal .modal-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+#deleteFileName,
+#downloadFileName {
+    color: #495057;
+    font-size: 0.95rem;
+    word-break: break-word;
+}
+
+/* Animate modal entrance */
+#deleteConfirmModal .modal-dialog,
+#downloadConfirmModal .modal-dialog {
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Tamper Detection Modal */
+#tamperDetectionModal .modal-dialog {
+    max-width: 600px;
+}
+
+#tamperDetectionModal code {
+    background-color: #f8f9fa;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    word-break: break-all;
+}
+
+#tamperDetectionModal .modal-body {
+    padding: 2rem;
+}
+
+#tamperDetectionModal .bi-shield-check,
+#tamperDetectionModal .bi-shield-exclamation {
+    display: inline-block;
+    animation: iconPulse 0.5s ease-out;
+}
+
+@keyframes iconPulse {
+    0% {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.1);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* DataTable styling improvements */
+#uploadsDataTable {
+    font-size: 0.9rem;
+    table-layout: fixed;
+}
+
+#uploadsDataTable thead th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    border-bottom: 2px solid #dee2e6;
+    white-space: nowrap;
+}
+
+#uploadsDataTable tbody td {
+    word-wrap: break-word;
+    word-break: break-all;
+    white-space: normal;
+    overflow: hidden;
+    vertical-align: middle;
+    padding: 0.75rem;
+}
+
+#uploadsDataTable tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+#uploadsDataTable code {
+    background-color: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    word-break: break-all;
+    white-space: normal;
+    display: inline-block;
+    max-width: 100%;
+}
