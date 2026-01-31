@@ -4,7 +4,7 @@ import secrets
 from io import BytesIO
 from threading import Thread
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 import logging
 import traceback
@@ -239,6 +239,7 @@ def upload_file_to_s3(file_data, filename, upload_id, user_id):
             'status': 'completed',
             's3_key': key_name,
             'encryption_key': encryption_key,
+            'file_size': len(file_data),  # Store original file size in bytes
             'created_at': datetime.utcnow(),
             'completed_at': datetime.utcnow()
         }
@@ -393,11 +394,21 @@ def upload_history():
 
     upload_list = []
     for upload in uploads:
+        created_at = upload.get('created_at')
+        if created_at:
+            # Ensure timezone-aware datetime for proper ISO format
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            created_at_str = created_at.isoformat()
+        else:
+            created_at_str = None
+
         upload_list.append({
             'filename': upload.get('filename'),
             'status': upload.get('status'),
-            'created_at': upload.get('created_at').isoformat() if upload.get('created_at') else None,
-            'file_hash': upload.get('file_hash')
+            'created_at': created_at_str,
+            'file_hash': upload.get('file_hash'),
+            'file_size': upload.get('file_size', 0)
         })
 
     return jsonify(upload_list)
@@ -412,14 +423,33 @@ def upload_archive():
 
     upload_list = []
     for upload in uploads:
+        # Handle created_at with timezone
+        created_at = upload.get('created_at')
+        if created_at:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            created_at_str = created_at.isoformat()
+        else:
+            created_at_str = None
+
+        # Handle completed_at with timezone
+        completed_at = upload.get('completed_at')
+        if completed_at:
+            if completed_at.tzinfo is None:
+                completed_at = completed_at.replace(tzinfo=timezone.utc)
+            completed_at_str = completed_at.isoformat()
+        else:
+            completed_at_str = None
+
         upload_list.append({
             'filename': upload.get('filename'),
             'status': upload.get('status'),
-            'created_at': upload.get('created_at').isoformat() if upload.get('created_at') else None,
-            'completed_at': upload.get('completed_at').isoformat() if upload.get('completed_at') else None,
+            'created_at': created_at_str,
+            'completed_at': completed_at_str,
             'file_hash': upload.get('file_hash'),
             's3_key': upload.get('s3_key'),
-            'upload_id': upload.get('upload_id')
+            'upload_id': upload.get('upload_id'),
+            'file_size': upload.get('file_size', 0)
         })
 
     return jsonify(upload_list)
@@ -793,7 +823,7 @@ def health_check():
         'status': 'healthy',
         'mongodb': 'unknown',
         's3': 'unknown',
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }
 
     # Check MongoDB

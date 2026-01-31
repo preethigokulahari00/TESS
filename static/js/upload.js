@@ -14,9 +14,31 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Load upload history on page load
     loadUploadHistory();
+    updateDashboardStats();
+
+    // Get browse button reference
+    const browseBtn = document.getElementById('browseBtn');
+    const dropZone = document.getElementById('dropZone');
+
+    // Browse button handler
+    if (browseBtn) {
+        browseBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            fileInput.click();
+        });
+    }
+
+    // Second "View All" button handler
+    const viewAllUploadsBtn2 = document.getElementById('viewAllUploadsBtn2');
+    if (viewAllUploadsBtn2) {
+        viewAllUploadsBtn2.addEventListener('click', function() {
+            loadAllUploads();
+        });
+    }
 
     // File input change handler
-    fileInput.addEventListener('change', function() {
+    fileInput.addEventListener('change', function(e) {
         const file = this.files[0];
         if (file) {
             const validation = validateFile(file);
@@ -29,25 +51,41 @@ document.addEventListener('DOMContentLoaded', function() {
             // Show file info
             showFileInfo(file);
         }
-    });
+    }, false);
 
     // Drag and drop functionality
-    const formCard = uploadForm.closest('.card-body');
+    if (dropZone) {
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
 
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        formCard.addEventListener(eventName, preventDefaults, false);
-        document.body.addEventListener(eventName, preventDefaults, false);
-    });
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
 
-    ['dragenter', 'dragover'].forEach(eventName => {
-        formCard.addEventListener(eventName, highlight, false);
-    });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
 
-    ['dragleave', 'drop'].forEach(eventName => {
-        formCard.addEventListener(eventName, unhighlight, false);
-    });
+        dropZone.addEventListener('drop', handleDrop, false);
 
-    formCard.addEventListener('drop', handleDrop, false);
+        // Click on drop zone to browse (but not on the browse button itself)
+        dropZone.addEventListener('click', function(e) {
+            // Don't trigger if clicking the browse button or its children
+            const browseButton = document.getElementById('browseBtn');
+            if (e.target === browseButton || (browseButton && browseButton.contains(e.target))) {
+                return;
+            }
+            // Don't trigger if clicking the file input
+            if (e.target === fileInput) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            fileInput.click();
+        });
+    }
 
     function preventDefaults(e) {
         e.preventDefault();
@@ -92,35 +130,52 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     function showFileInfo(file) {
-        const fileInfo = document.createElement('div');
-        fileInfo.className = 'file-info mt-3';
-        fileInfo.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <h6 class="mb-1"><i class="bi bi-file-earmark"></i> ${sanitizeHtml(file.name)}</h6>
-                    <small class="text-muted">Size: ${formatFileSize(file.size)} | Type: ${sanitizeHtml(file.type || 'Unknown')}</small>
-                </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearFileSelection()">
-                    <i class="bi bi-x"></i>
-                </button>
-            </div>
-        `;
-
-        // Remove existing file info
-        const existingInfo = uploadForm.querySelector('.file-info');
-        if (existingInfo) {
-            existingInfo.remove();
+        // Hide drop zone
+        const dropZone = document.getElementById('dropZone');
+        if (dropZone) {
+            dropZone.style.display = 'none';
         }
 
-        // Add new file info
-        uploadForm.appendChild(fileInfo);
+        // Show selected file section
+        const selectedFileSection = document.getElementById('selectedFileSection');
+        if (selectedFileSection) {
+            selectedFileSection.style.display = 'block';
+        }
+
+        // Update file info
+        const selectedFileName = document.getElementById('selectedFileName');
+        const selectedFileSize = document.getElementById('selectedFileSize');
+
+        if (selectedFileName) {
+            selectedFileName.innerHTML = `<strong>${sanitizeHtml(file.name)}</strong>`;
+        }
+
+        if (selectedFileSize) {
+            selectedFileSize.textContent = `Size: ${formatFileSize(file.size)} | Type: ${sanitizeHtml(file.type || 'Unknown')}`;
+        }
+    }
+
+    // Clear file selection handler
+    const clearFileBtn = document.getElementById('clearFileBtn');
+    if (clearFileBtn) {
+        clearFileBtn.addEventListener('click', function() {
+            clearFileSelection();
+        });
     }
 
     window.clearFileSelection = function() {
         fileInput.value = '';
-        const fileInfo = uploadForm.querySelector('.file-info');
-        if (fileInfo) {
-            fileInfo.remove();
+
+        // Hide selected file section
+        const selectedFileSection = document.getElementById('selectedFileSection');
+        if (selectedFileSection) {
+            selectedFileSection.style.display = 'none';
+        }
+
+        // Show drop zone again
+        const dropZone = document.getElementById('dropZone');
+        if (dropZone) {
+            dropZone.style.display = 'block';
         }
     };
 
@@ -129,6 +184,12 @@ document.addEventListener('DOMContentLoaded', function() {
         uploadBtn.disabled = true;
         fileInput.disabled = true;
         uploadBtn.innerHTML = '<i class="bi bi-cloud-upload"></i> Uploading...';
+
+        // Hide selected file section
+        const selectedFileSection = document.getElementById('selectedFileSection');
+        if (selectedFileSection) {
+            selectedFileSection.style.display = 'none';
+        }
 
         // Show progress
         uploadProgress.style.display = 'block';
@@ -227,8 +288,15 @@ document.addEventListener('DOMContentLoaded', function() {
             'success'
         );
 
-        // Add to upload history
-        addToUploadHistory(data);
+        // Reload upload history from server to get updated count
+        setTimeout(() => {
+            // Clear existing history first
+            uploadHistory.innerHTML = '';
+            loadUploadHistory();
+        }, 500);
+
+        // Update dashboard statistics
+        updateDashboardStats();
 
         // Reset form after a delay
         setTimeout(resetUploadForm, 2000);
@@ -257,9 +325,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Clear file selection
         fileInput.value = '';
-        const fileInfo = uploadForm.querySelector('.file-info');
-        if (fileInfo) {
-            fileInfo.remove();
+
+        // Hide selected file section
+        const selectedFileSection = document.getElementById('selectedFileSection');
+        if (selectedFileSection) {
+            selectedFileSection.style.display = 'none';
+        }
+
+        // Show drop zone again
+        const dropZone = document.getElementById('dropZone');
+        if (dropZone) {
+            dropZone.style.display = 'block';
         }
 
         // Hide progress after delay
@@ -277,55 +353,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function addToUploadHistory(data) {
-        const historyContainer = uploadHistory;
-
-        // Remove "no files" message if present
-        const noFilesMsg = historyContainer.querySelector('.text-center');
-        if (noFilesMsg) {
-            noFilesMsg.remove();
-        }
-
-        // Create upload item
-        const uploadItem = document.createElement('div');
-        uploadItem.className = 'list-group-item';
-        uploadItem.innerHTML = `
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="flex-grow-1">
-                    <h6 class="mb-1">
-                        <i class="bi bi-file-earmark-check text-success"></i>
-                        ${sanitizeHtml(data.filename)}
-                    </h6>
-                    <p class="mb-1 small text-muted">
-                        Uploaded: ${new Date().toLocaleString()}
-                    </p>
-                    <small class="text-success">
-                        <i class="bi bi-shield-check"></i> Encrypted and stored securely
-                    </small>
-                </div>
-                <span class="badge bg-success">
-                    <i class="bi bi-check-circle"></i>
-                </span>
-            </div>
-        `;
-
-        // Add to top of history
-        historyContainer.insertBefore(uploadItem, historyContainer.firstChild);
-
-        // Limit history to 10 items
-        const items = historyContainer.querySelectorAll('.list-group-item');
-        if (items.length > 10) {
-            items[items.length - 1].remove();
-        }
-
-        // Animate in
-        uploadItem.style.opacity = '0';
-        uploadItem.style.transform = 'translateX(-20px)';
-        uploadItem.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-
-        setTimeout(() => {
-            uploadItem.style.opacity = '1';
-            uploadItem.style.transform = 'translateX(0)';
-        }, 10);
+        // This function is no longer used since we reload history from server
+        // We now reload the entire history after upload to keep it in sync
     }
 
     function loadUploadHistory() {
@@ -343,30 +372,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 // Add each upload to history
-                uploads.forEach(upload => {
+                uploads.forEach((upload, index) => {
                     const uploadItem = document.createElement('div');
-                    uploadItem.className = 'list-group-item';
+                    uploadItem.className = 'upload-history-item';
+                    uploadItem.style.animationDelay = `${index * 0.1}s`;
 
                     const uploadDate = upload.created_at ? new Date(upload.created_at).toLocaleString() : 'Unknown';
-                    const statusBadge = upload.status === 'completed'
-                        ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i></span>'
-                        : '<span class="badge bg-warning"><i class="bi bi-clock"></i></span>';
+                    const relativeTime = upload.created_at ? getRelativeTime(new Date(upload.created_at)) : 'Unknown';
+
+                    // Get file extension for icon
+                    const fileName = upload.filename || '';
+                    const extension = fileName.split('.').pop().toLowerCase();
+                    const fileIcon = getFileIcon(extension);
+                    const fileColor = getFileColor(extension);
 
                     uploadItem.innerHTML = `
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div class="flex-grow-1">
-                                <h6 class="mb-1">
-                                    <i class="bi bi-file-earmark-check text-success"></i>
-                                    ${sanitizeHtml(upload.filename)}
-                                </h6>
-                                <p class="mb-1 small text-muted">
-                                    Uploaded: ${uploadDate}
-                                </p>
-                                <small class="text-success">
-                                    <i class="bi bi-shield-check"></i> Encrypted and stored securely
-                                </small>
+                        <div class="upload-item-content">
+                            <div class="file-icon-wrapper" style="background-color: ${fileColor};">
+                                <i class="bi ${fileIcon}"></i>
                             </div>
-                            ${statusBadge}
+                            <div class="file-details">
+                                <h6 class="file-name">${sanitizeHtml(fileName)}</h6>
+                                <div class="file-meta">
+                                    <span class="meta-item">
+                                        <i class="bi bi-clock"></i> ${relativeTime}
+                                    </span>
+                                    <span class="meta-item">
+                                        <i class="bi bi-shield-check text-success"></i> Encrypted
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="file-status">
+                                ${upload.status === 'completed'
+                                    ? '<span class="status-badge status-success"><i class="bi bi-check-circle-fill"></i> Completed</span>'
+                                    : '<span class="status-badge status-pending"><i class="bi bi-clock-fill"></i> Pending</span>'}
+                            </div>
                         </div>
                     `;
 
@@ -375,6 +415,152 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('Failed to load upload history:', error);
+            });
+    }
+
+    // Helper function to get relative time
+    function getRelativeTime(date) {
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return date.toLocaleDateString();
+    }
+
+    // Helper function to get file icon based on extension
+    function getFileIcon(extension) {
+        const iconMap = {
+            // Documents
+            'pdf': 'bi-file-earmark-pdf-fill',
+            'doc': 'bi-file-earmark-word-fill',
+            'docx': 'bi-file-earmark-word-fill',
+            'txt': 'bi-file-earmark-text-fill',
+            'rtf': 'bi-file-earmark-text-fill',
+
+            // Spreadsheets
+            'xls': 'bi-file-earmark-excel-fill',
+            'xlsx': 'bi-file-earmark-excel-fill',
+            'csv': 'bi-file-earmark-excel-fill',
+
+            // Presentations
+            'ppt': 'bi-file-earmark-ppt-fill',
+            'pptx': 'bi-file-earmark-ppt-fill',
+
+            // Images
+            'jpg': 'bi-file-earmark-image-fill',
+            'jpeg': 'bi-file-earmark-image-fill',
+            'png': 'bi-file-earmark-image-fill',
+            'gif': 'bi-file-earmark-image-fill',
+            'svg': 'bi-file-earmark-image-fill',
+
+            // Archives
+            'zip': 'bi-file-earmark-zip-fill',
+            'rar': 'bi-file-earmark-zip-fill',
+            '7z': 'bi-file-earmark-zip-fill',
+
+            // Code
+            'js': 'bi-file-earmark-code-fill',
+            'html': 'bi-file-earmark-code-fill',
+            'css': 'bi-file-earmark-code-fill',
+            'py': 'bi-file-earmark-code-fill',
+            'java': 'bi-file-earmark-code-fill',
+
+            // Video
+            'mp4': 'bi-file-earmark-play-fill',
+            'avi': 'bi-file-earmark-play-fill',
+            'mov': 'bi-file-earmark-play-fill',
+
+            // Audio
+            'mp3': 'bi-file-earmark-music-fill',
+            'wav': 'bi-file-earmark-music-fill',
+            'flac': 'bi-file-earmark-music-fill',
+        };
+
+        return iconMap[extension] || 'bi-file-earmark-fill';
+    }
+
+    // Helper function to get file color based on extension
+    function getFileColor(extension) {
+        const colorMap = {
+            'pdf': 'rgba(220, 53, 69, 0.1)',
+            'doc': 'rgba(13, 110, 253, 0.1)',
+            'docx': 'rgba(13, 110, 253, 0.1)',
+            'xls': 'rgba(25, 135, 84, 0.1)',
+            'xlsx': 'rgba(25, 135, 84, 0.1)',
+            'csv': 'rgba(25, 135, 84, 0.1)',
+            'ppt': 'rgba(253, 126, 20, 0.1)',
+            'pptx': 'rgba(253, 126, 20, 0.1)',
+            'jpg': 'rgba(111, 66, 193, 0.1)',
+            'jpeg': 'rgba(111, 66, 193, 0.1)',
+            'png': 'rgba(111, 66, 193, 0.1)',
+            'zip': 'rgba(108, 117, 125, 0.1)',
+            'rar': 'rgba(108, 117, 125, 0.1)',
+            'mp4': 'rgba(220, 53, 69, 0.1)',
+            'mp3': 'rgba(13, 202, 240, 0.1)',
+        };
+
+        return colorMap[extension] || 'rgba(102, 126, 234, 0.1)';
+    }
+
+    // Update dashboard statistics
+    function updateDashboardStats() {
+        fetch('/upload-archive')
+            .then(response => response.json())
+            .then(uploads => {
+                // Total files count
+                const totalFilesCount = document.getElementById('totalFilesCount');
+                if (totalFilesCount) {
+                    totalFilesCount.textContent = uploads.length;
+                }
+
+                // Encrypted count (completed status)
+                const encryptedCount = document.getElementById('encryptedCount');
+                if (encryptedCount) {
+                    const encrypted = uploads.filter(u => u.status === 'completed').length;
+                    encryptedCount.textContent = encrypted;
+                }
+
+                // Storage size (calculate actual total from file sizes)
+                const storageSize = document.getElementById('storageSize');
+                if (storageSize) {
+                    // Calculate total storage in bytes
+                    const totalBytes = uploads.reduce((sum, upload) => sum + (upload.file_size || 0), 0);
+
+                    // Format bytes to human-readable format
+                    storageSize.textContent = formatFileSize(totalBytes);
+                }
+
+                // Last upload time
+                const lastUploadTime = document.getElementById('lastUploadTime');
+                if (lastUploadTime && uploads.length > 0) {
+                    const latestUpload = uploads[0]; // Already sorted by created_at desc
+                    if (latestUpload.created_at) {
+                        const uploadDate = new Date(latestUpload.created_at);
+                        const now = new Date();
+                        const diffMinutes = Math.floor((now - uploadDate) / 60000);
+
+                        if (diffMinutes < 1) {
+                            lastUploadTime.textContent = 'Just now';
+                        } else if (diffMinutes < 60) {
+                            lastUploadTime.textContent = `${diffMinutes}m ago`;
+                        } else if (diffMinutes < 1440) {
+                            const hours = Math.floor(diffMinutes / 60);
+                            lastUploadTime.textContent = `${hours}h ago`;
+                        } else {
+                            const days = Math.floor(diffMinutes / 1440);
+                            lastUploadTime.textContent = `${days}d ago`;
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load dashboard stats:', error);
             });
     }
 
@@ -418,17 +604,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 const tableData = uploads.map(upload => {
                     const uploadId = upload.upload_id || '';
                     const s3Key = upload.s3_key || '';
+                    const fileSize = upload.file_size ? formatFileSize(upload.file_size) : 'N/A';
 
                     return [
                         upload.filename || 'N/A',
+                        fileSize,
                         upload.status === 'completed'
                             ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Completed</span>'
                             : '<span class="badge bg-warning"><i class="bi bi-clock"></i> Pending</span>',
                         upload.created_at ? new Date(upload.created_at).toLocaleString() : 'N/A',
                         upload.completed_at ? new Date(upload.completed_at).toLocaleString() : 'N/A',
-                        upload.file_hash
-                            ? `<code class="small">${upload.file_hash}</code>`
-                            : 'N/A',
                         `<div class="action-buttons">
                             <button class="btn btn-sm btn-outline-success verify-btn" data-uploadid="${uploadId}" data-filename="${upload.filename}" title="Verify Integrity">
                                 <i class="bi bi-shield-check"></i>
@@ -448,14 +633,29 @@ document.addEventListener('DOMContentLoaded', function() {
                     data: tableData,
                     pageLength: 10,
                     lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
-                    order: [[2, 'desc']], // Sort by upload date descending
+                    order: [[3, 'desc']], // Sort by upload date descending (column 3 now)
                     colReorder: true, // Enable column reordering
                     autoWidth: false, // Disable auto width for better resize control
+                    responsive: {
+                        details: {
+                            type: 'column',
+                            target: 'tr'
+                        }
+                    },
                     columnDefs: [
                         {
                             targets: -1, // Last column (Actions)
                             orderable: false, // Disable sorting
-                            searchable: false // Exclude from search
+                            searchable: false, // Exclude from search
+                            className: 'actions-column-cell'
+                        },
+                        {
+                            targets: 1, // File Size column
+                            className: 'text-end' // Right-align file sizes
+                        },
+                        {
+                            targets: [3, 4], // Date columns
+                            className: 'date-column'
                         }
                     ],
                     language: {
@@ -468,7 +668,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         zeroRecords: "No matching uploads found",
                         emptyTable: "No uploads available"
                     },
-                    scrollX: false,
+                    scrollX: true,
+                    scrollCollapse: true,
                     dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
                          '<"row"<"col-sm-12"tr>>' +
                          '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>'
@@ -492,6 +693,7 @@ document.addEventListener('DOMContentLoaded', function() {
         $('#uploadsDataTable').on('click', '.verify-btn', function() {
             const uploadId = $(this).data('uploadid');
             const filename = $(this).data('filename');
+            const buttonElement = this;
 
             if (!uploadId) {
                 window.toastManager.show('Error', 'Unable to verify file: Upload ID not found', 'error');
@@ -499,7 +701,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             // Call tamper detection function
-            verifyFileIntegrity(uploadId, filename);
+            verifyFileIntegrity(uploadId, filename, buttonElement);
         });
 
         // Download button handler
@@ -572,7 +774,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Download file function
     function downloadFile(s3Key, filename) {
-        window.toastManager.show('Downloading', `Starting download for ${filename}...`, 'info');
+        // Show loading modal
+        showDownloadLoadingModal(filename);
 
         fetch(`/download/${encodeURIComponent(s3Key)}`)
             .then(async response => {
@@ -599,6 +802,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 return response.blob();
             })
             .then(blob => {
+                // Hide loading modal
+                hideDownloadLoadingModal();
+
                 // Create download link
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -613,6 +819,9 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('Download error:', error);
+
+                // Hide loading modal
+                hideDownloadLoadingModal();
 
                 // Check if this is a detailed error from backend
                 if (error.isDetailedError && error.errorType) {
@@ -658,13 +867,34 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Verify file integrity function
-    function verifyFileIntegrity(uploadId, filename) {
-        // Show loading toast
-        window.toastManager.show('Verifying', `Checking integrity of ${filename}...`, 'info');
+    function verifyFileIntegrity(uploadId, filename, buttonElement) {
+        // Show loading modal
+        showVerificationLoadingModal(filename);
+
+        // Disable the button and show loading state
+        if (buttonElement) {
+            buttonElement.disabled = true;
+            const originalHTML = buttonElement.innerHTML;
+            buttonElement.innerHTML = '<i class="bi bi-hourglass-split spinner-icon"></i>';
+            buttonElement.classList.add('btn-verifying');
+
+            // Store original HTML to restore later
+            buttonElement.dataset.originalHtml = originalHTML;
+        }
 
         fetch(`/verify-file/${encodeURIComponent(uploadId)}`)
             .then(response => response.json())
             .then(data => {
+                // Hide loading modal
+                hideVerificationLoadingModal();
+
+                // Re-enable button
+                if (buttonElement) {
+                    buttonElement.disabled = false;
+                    buttonElement.innerHTML = buttonElement.dataset.originalHtml || '<i class="bi bi-shield-check"></i>';
+                    buttonElement.classList.remove('btn-verifying');
+                }
+
                 if (data.error) {
                     throw new Error(data.error);
                 }
@@ -674,6 +904,17 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('Verification error:', error);
+
+                // Hide loading modal
+                hideVerificationLoadingModal();
+
+                // Re-enable button
+                if (buttonElement) {
+                    buttonElement.disabled = false;
+                    buttonElement.innerHTML = buttonElement.dataset.originalHtml || '<i class="bi bi-shield-check"></i>';
+                    buttonElement.classList.remove('btn-verifying');
+                }
+
                 window.toastManager.show('Error', `Failed to verify ${filename}`, 'error');
             });
     }
@@ -720,6 +961,110 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Show the modal
         tamperDetectionModal.show();
+    }
+
+    // Show verification loading modal
+    function showVerificationLoadingModal(filename) {
+        // Create loading modal HTML if it doesn't exist
+        let loadingModal = document.getElementById('verificationLoadingModal');
+        if (!loadingModal) {
+            const modalHTML = `
+                <div class="modal fade" id="verificationLoadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+                    <div class="modal-dialog modal-dialog-centered modal-sm">
+                        <div class="modal-content verification-loading-content">
+                            <div class="modal-body text-center p-4">
+                                <div class="verification-loader mb-3">
+                                    <div class="gears-container">
+                                        <i class="bi bi-gear-fill gear-1"></i>
+                                        <i class="bi bi-gear-fill gear-2"></i>
+                                    </div>
+                                </div>
+                                <h5 class="mb-2">Verifying Integrity</h5>
+                                <p class="text-muted mb-1 small" id="verifyingFileName"></p>
+                                <div class="verification-stage mt-3">
+                                    <div class="stage-indicator">
+                                        <i class="bi bi-hourglass-split"></i>
+                                        <span id="verificationStage">Please wait...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            loadingModal = document.getElementById('verificationLoadingModal');
+        }
+
+        // Update filename
+        document.getElementById('verifyingFileName').textContent = filename;
+
+        // Show modal
+        const modal = new bootstrap.Modal(loadingModal);
+        modal.show();
+    }
+
+    // Hide verification loading modal
+    function hideVerificationLoadingModal() {
+        const loadingModal = document.getElementById('verificationLoadingModal');
+        if (loadingModal) {
+            const modal = bootstrap.Modal.getInstance(loadingModal);
+            if (modal) {
+                modal.hide();
+            }
+        }
+    }
+
+    // Show download loading modal
+    function showDownloadLoadingModal(filename) {
+        // Create loading modal HTML if it doesn't exist
+        let loadingModal = document.getElementById('downloadLoadingModal');
+        if (!loadingModal) {
+            const modalHTML = `
+                <div class="modal fade" id="downloadLoadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+                    <div class="modal-dialog modal-dialog-centered modal-sm">
+                        <div class="modal-content download-loading-content">
+                            <div class="modal-body text-center p-4">
+                                <div class="download-loader mb-3">
+                                    <div class="gears-container">
+                                        <i class="bi bi-gear-fill gear-1"></i>
+                                        <i class="bi bi-gear-fill gear-2"></i>
+                                    </div>
+                                </div>
+                                <h5 class="mb-2">Downloading File</h5>
+                                <p class="text-muted mb-1 small" id="downloadingFileName"></p>
+                                <div class="download-stage mt-3">
+                                    <div class="stage-indicator">
+                                        <i class="bi bi-cloud-download"></i>
+                                        <span id="downloadStage">Please wait...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            loadingModal = document.getElementById('downloadLoadingModal');
+        }
+
+        // Update filename
+        document.getElementById('downloadingFileName').textContent = filename;
+
+        // Show modal
+        const modal = new bootstrap.Modal(loadingModal);
+        modal.show();
+    }
+
+    // Hide download loading modal
+    function hideDownloadLoadingModal() {
+        const loadingModal = document.getElementById('downloadLoadingModal');
+        if (loadingModal) {
+            const modal = bootstrap.Modal.getInstance(loadingModal);
+            if (modal) {
+                modal.hide();
+            }
+        }
     }
 
     // Function to make table columns resizable
