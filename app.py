@@ -63,9 +63,9 @@ from botocore.config import Config
 
 boto_config = Config(
     region_name=aws_region,
-    connect_timeout=5,  # 5 seconds connection timeout
-    read_timeout=60,    # 60 seconds read timeout
-    retries={'max_attempts': 2, 'mode': 'standard'},  # Reduce retry attempts
+    connect_timeout=10,  # 10 seconds connection timeout
+    read_timeout=300,    # 300 seconds (5 minutes) read timeout for large files
+    retries={'max_attempts': 3, 'mode': 'standard'},
     max_pool_connections=10  # Connection pooling
 )
 
